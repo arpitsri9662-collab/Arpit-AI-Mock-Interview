@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: ai-mock-interview-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: PORT
+        value: 5000
+
+  - type: web
+    name: ai-mock-interview-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm run build
+    startCommand: npm run preview
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: VITE_BACKEND_URL
+        sync: false
