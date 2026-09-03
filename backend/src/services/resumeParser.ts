@@ -4,25 +4,97 @@ import pdf from 'pdf-parse';
 import mammoth from 'mammoth';
 
 export interface ParsedResume {
+  // Full raw resume text.
+  // This will be stored separately in Resume.resumeText
+  // and later used for RAG chunking + embeddings.
+  text: string;
+
   skills: string[];
   projects: Array<{ name: string; description: string }>;
-  experience: Array<{ company: string; role: string; duration: string }>;
+  experience: Array<{
+    company: string;
+    role: string;
+    duration: string;
+  }>;
 }
 
 const TECHNICAL_SKILLS = [
-  'javascript', 'typescript', 'python', 'java', 'c++', 'c#', 'go', 'rust', 'ruby', 'php',
-  'react', 'angular', 'vue', 'node', 'express', 'django', 'flask', 'spring', 'laravel',
-  'mongodb', 'mysql', 'postgresql', 'redis', 'elasticsearch', 'graphql', 'rest', 'api',
-  'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'jenkins', 'git', 'linux', 'html', 'css',
-  'tailwind', 'bootstrap', 'sql', 'nosql', 'machine learning', 'ai', 'data science',
-  'typescript', 'nextjs', 'nuxt', 'svelte', 'flutter', 'react native', 'swift', 'kotlin'
+  'javascript',
+  'typescript',
+  'python',
+  'java',
+  'c++',
+  'c#',
+  'go',
+  'rust',
+  'ruby',
+  'php',
+  'react',
+  'angular',
+  'vue',
+  'node',
+  'express',
+  'django',
+  'flask',
+  'spring',
+  'laravel',
+  'mongodb',
+  'mysql',
+  'postgresql',
+  'redis',
+  'elasticsearch',
+  'graphql',
+  'rest',
+  'api',
+  'aws',
+  'azure',
+  'gcp',
+  'docker',
+  'kubernetes',
+  'jenkins',
+  'git',
+  'linux',
+  'html',
+  'css',
+  'tailwind',
+  'bootstrap',
+  'sql',
+  'nosql',
+  'machine learning',
+  'ai',
+  'data science',
+  'nextjs',
+  'nuxt',
+  'svelte',
+  'flutter',
+  'react native',
+  'swift',
+  'kotlin',
 ];
 
-const PROJECT_KEYWORDS = ['project', 'built', 'developed', 'created', 'implemented', 'designed'];
-const EXPERIENCE_KEYWORDS = ['experience', 'work', 'intern', 'role', 'position', 'company'];
+const PROJECT_KEYWORDS = [
+  'project',
+  'built',
+  'developed',
+  'created',
+  'implemented',
+  'designed',
+];
 
-export const parseResume = async (filePath: string): Promise<ParsedResume> => {
+const EXPERIENCE_KEYWORDS = [
+  'experience',
+  'work',
+  'intern',
+  'role',
+  'position',
+  'company',
+];
+
+export const parseResume = async (
+  filePath: string
+): Promise<ParsedResume> => {
   const ext = path.extname(filePath).toLowerCase();
+
   let text: string;
 
   if (ext === '.pdf') {
@@ -30,48 +102,90 @@ export const parseResume = async (filePath: string): Promise<ParsedResume> => {
   } else if (ext === '.docx') {
     text = await parseDOCX(filePath);
   } else {
-    throw new Error('Unsupported file format. Only PDF and DOCX are supported.');
+    throw new Error(
+      'Unsupported file format. Only PDF and DOCX are supported.'
+    );
   }
 
-  return extractInformation(text);
+  // Clean the extracted text while preserving the actual resume content.
+  const cleanedText = cleanResumeText(text);
+
+  return extractInformation(cleanedText);
 };
 
 const parsePDF = async (filePath: string): Promise<string> => {
   const dataBuffer = fs.readFileSync(filePath);
   const data = await pdf(dataBuffer);
+
   return data.text;
 };
 
 const parseDOCX = async (filePath: string): Promise<string> => {
-  const result = await mammoth.extractRawText({ path: filePath });
+  const result = await mammoth.extractRawText({
+    path: filePath,
+  });
+
   return result.value;
+};
+
+/**
+ * Clean extracted PDF/DOCX text.
+ *
+ * This keeps the original resume information while removing
+ * excessive whitespace that would make RAG chunks unnecessarily noisy.
+ */
+const cleanResumeText = (text: string): string => {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 };
 
 const extractInformation = (text: string): ParsedResume => {
   const lowerText = text.toLowerCase();
-  
+
   const skills = extractSkills(lowerText);
   const projects = extractProjects(text);
   const experience = extractExperience(text);
 
-  return { skills, projects, experience };
+  return {
+    // IMPORTANT:
+    // Preserve the complete resume text for RAG.
+    text,
+
+    skills,
+    projects,
+    experience,
+  };
 };
 
 const extractSkills = (text: string): string[] => {
   const foundSkills: string[] = [];
-  
+
   for (const skill of TECHNICAL_SKILLS) {
     if (text.includes(skill)) {
       foundSkills.push(skill);
     }
   }
 
-  const skillSections = text.match(/(?:skills|technical skills|technologies)[\s:]*([\s\S]*?)(?:\n\n|$)/gi);
+  const skillSections = text.match(
+    /(?:skills|technical skills|technologies)[\s:]*([\s\S]*?)(?:\n\n|$)/gi
+  );
+
   if (skillSections) {
     for (const section of skillSections) {
-      const skills = section.split(/[,;\n]/).map(s => s.trim().toLowerCase()).filter(s => s.length > 2);
+      const skills = section
+        .split(/[,;\n]/)
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 2);
+
       for (const skill of skills) {
-        if (!foundSkills.includes(skill) && TECHNICAL_SKILLS.some(ts => skill.includes(ts))) {
+        if (
+          !foundSkills.includes(skill) &&
+          TECHNICAL_SKILLS.some((ts) => skill.includes(ts))
+        ) {
           foundSkills.push(skill);
         }
       }
@@ -107,7 +221,10 @@ export const analyzeResumeSuitability = async (
     try {
       return await analyzeWithGemini(parsedData, role);
     } catch (error) {
-      console.error('[ResumeAnalysis] Gemini analysis failed, using local fallback:', error);
+      console.error(
+        '[ResumeAnalysis] Gemini analysis failed, using local fallback:',
+        error
+      );
     }
   }
 
@@ -118,7 +235,10 @@ export const analyzeResumeSuitability = async (
 /**
  * Real-time Gemini-powered resume analysis
  */
-async function analyzeWithGemini(parsedData: ParsedResume, role: string): Promise<ResumeAnalysis> {
+async function analyzeWithGemini(
+  parsedData: ParsedResume,
+  role: string
+): Promise<ResumeAnalysis> {
   const roleLabels: Record<string, string> = {
     frontend: 'Frontend Developer',
     backend: 'Backend Developer',
@@ -140,14 +260,24 @@ async function analyzeWithGemini(parsedData: ParsedResume, role: string): Promis
 CANDIDATE'S SKILLS: ${parsedData.skills.join(', ') || 'None listed'}
 
 CANDIDATE'S PROJECTS:
-${parsedData.projects.length > 0
-    ? parsedData.projects.map(p => `- ${p.name}: ${p.description}`).join('\n')
-    : 'No projects listed'}
+${
+  parsedData.projects.length > 0
+    ? parsedData.projects
+        .map((p) => `- ${p.name}: ${p.description}`)
+        .join('\n')
+    : 'No projects listed'
+}
 
 CANDIDATE'S EXPERIENCE:
-${parsedData.experience.length > 0
-    ? parsedData.experience.map(e => `- ${e.role} at ${e.company} (${e.duration})`).join('\n')
-    : 'No experience listed'}
+${
+  parsedData.experience.length > 0
+    ? parsedData.experience
+        .map(
+          (e) => `- ${e.role} at ${e.company} (${e.duration})`
+        )
+        .join('\n')
+    : 'No experience listed'
+}
 
 TARGET ROLE: ${roleLabel}
 
@@ -175,9 +305,15 @@ IMPORTANT:
     `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
         generationConfig: {
           temperature: 0.6,
           topP: 0.9,
@@ -189,11 +325,16 @@ IMPORTANT:
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+
+    throw new Error(
+      `Gemini API error ${response.status}: ${errorText}`
+    );
   }
 
   const data: any = await response.json();
-  const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+  const resultText =
+    data.candidates?.[0]?.content?.parts?.[0]?.text;
 
   if (!resultText) {
     throw new Error('Empty response from Gemini');
@@ -201,6 +342,7 @@ IMPORTANT:
 
   // Parse JSON from response
   const jsonMatch = resultText.match(/\{[\s\S]*\}/);
+
   if (!jsonMatch) {
     throw new Error('No JSON found in Gemini response');
   }
@@ -208,51 +350,165 @@ IMPORTANT:
   const analysis = JSON.parse(jsonMatch[0]);
 
   return {
-    suitabilityScore: Math.max(0, Math.min(100, Math.round(Number(analysis.suitabilityScore) || 0))),
-    matchedSkills: Array.isArray(analysis.matchedSkills) ? analysis.matchedSkills : [],
-    missingSkills: Array.isArray(analysis.missingSkills) ? analysis.missingSkills : [],
-    recommendations: Array.isArray(analysis.recommendations) ? analysis.recommendations : [],
+    suitabilityScore: Math.max(
+      0,
+      Math.min(
+        100,
+        Math.round(Number(analysis.suitabilityScore) || 0)
+      )
+    ),
+    matchedSkills: Array.isArray(analysis.matchedSkills)
+      ? analysis.matchedSkills
+      : [],
+    missingSkills: Array.isArray(analysis.missingSkills)
+      ? analysis.missingSkills
+      : [],
+    recommendations: Array.isArray(analysis.recommendations)
+      ? analysis.recommendations
+      : [],
   };
 }
 
 /**
  * Local fallback analysis (keyword matching)
  */
-function analyzeLocally(parsedData: ParsedResume, role: string): ResumeAnalysis {
+function analyzeLocally(
+  parsedData: ParsedResume,
+  role: string
+): ResumeAnalysis {
   const roleSkills: Record<string, string[]> = {
-    frontend: ['javascript', 'typescript', 'react', 'vue', 'angular', 'html', 'css', 'tailwind'],
-    backend: ['nodejs', 'python', 'java', 'express', 'django', 'spring', 'sql', 'mongodb'],
-    fullstack: ['javascript', 'typescript', 'react', 'nodejs', 'express', 'sql', 'mongodb'],
-    mern: ['mongodb', 'express', 'react', 'nodejs'],
-    mevn: ['mongodb', 'express', 'vue', 'nodejs'],
-    mobile: ['react native', 'flutter', 'swift', 'kotlin'],
-    dse: ['python', 'machine learning', 'tensorflow', 'pandas', 'numpy', 'scikit-learn'],
-    da: ['sql', 'python', 'excel', 'tableau', 'power bi', 'pandas'],
-    ds: ['docker', 'kubernetes', 'aws', 'azure', 'jenkins', 'terraform'],
-    devops: ['aws', 'azure', 'gcp', 'docker', 'kubernetes'],
-    qa: ['selenium', 'cypress', 'jest', 'testing', 'automation']
+    frontend: [
+      'javascript',
+      'typescript',
+      'react',
+      'vue',
+      'angular',
+      'html',
+      'css',
+      'tailwind',
+    ],
+    backend: [
+      'nodejs',
+      'python',
+      'java',
+      'express',
+      'django',
+      'spring',
+      'sql',
+      'mongodb',
+    ],
+    fullstack: [
+      'javascript',
+      'typescript',
+      'react',
+      'nodejs',
+      'express',
+      'sql',
+      'mongodb',
+    ],
+    mern: [
+      'mongodb',
+      'express',
+      'react',
+      'nodejs',
+    ],
+    mevn: [
+      'mongodb',
+      'express',
+      'vue',
+      'nodejs',
+    ],
+    mobile: [
+      'react native',
+      'flutter',
+      'swift',
+      'kotlin',
+    ],
+    dse: [
+      'python',
+      'machine learning',
+      'tensorflow',
+      'pandas',
+      'numpy',
+      'scikit-learn',
+    ],
+    da: [
+      'sql',
+      'python',
+      'excel',
+      'tableau',
+      'power bi',
+      'pandas',
+    ],
+    ds: [
+      'docker',
+      'kubernetes',
+      'aws',
+      'azure',
+      'jenkins',
+      'terraform',
+    ],
+    devops: [
+      'aws',
+      'azure',
+      'gcp',
+      'docker',
+      'kubernetes',
+    ],
+    qa: [
+      'selenium',
+      'cypress',
+      'jest',
+      'testing',
+      'automation',
+    ],
   };
 
   const requiredSkills = roleSkills[role.toLowerCase()] || [];
-  const resumeSkills = parsedData.skills.map(s => s.toLowerCase());
 
-  const matchedSkills = requiredSkills.filter(skill => resumeSkills.includes(skill));
-  const missingSkills = requiredSkills.filter(skill => !resumeSkills.includes(skill));
+  const resumeSkills = parsedData.skills.map((s) =>
+    s.toLowerCase()
+  );
 
-  const suitabilityScore = requiredSkills.length > 0 ? Math.round((matchedSkills.length / requiredSkills.length) * 100) : 0;
+  const matchedSkills = requiredSkills.filter((skill) =>
+    resumeSkills.includes(skill)
+  );
 
-  const recommendations = [];
+  const missingSkills = requiredSkills.filter(
+    (skill) => !resumeSkills.includes(skill)
+  );
+
+  const suitabilityScore =
+    requiredSkills.length > 0
+      ? Math.round(
+          (matchedSkills.length / requiredSkills.length) * 100
+        )
+      : 0;
+
+  const recommendations: string[] = [];
+
   if (suitabilityScore < 50) {
-    recommendations.push('Consider gaining more experience in core technologies for this role.');
+    recommendations.push(
+      'Consider gaining more experience in core technologies for this role.'
+    );
   }
+
   if (missingSkills.length > 0) {
-    recommendations.push(`Focus on learning: ${missingSkills.slice(0, 3).join(', ')}`);
+    recommendations.push(
+      `Focus on learning: ${missingSkills.slice(0, 3).join(', ')}`
+    );
   }
+
   if (parsedData.projects.length < 2) {
-    recommendations.push('Add more relevant projects to showcase your skills.');
+    recommendations.push(
+      'Add more relevant projects to showcase your skills.'
+    );
   }
+
   if (parsedData.experience.length === 0) {
-    recommendations.push('Highlight your professional experience more prominently.');
+    recommendations.push(
+      'Highlight your professional experience more prominently.'
+    );
   }
 
   return {
@@ -263,52 +519,107 @@ function analyzeLocally(parsedData: ParsedResume, role: string): ResumeAnalysis 
   };
 }
 
-const extractProjects = (text: string): Array<{ name: string; description: string }> => {
-  const projects: Array<{ name: string; description: string }> = [];
+const extractProjects = (
+  text: string
+): Array<{ name: string; description: string }> => {
+  const projects: Array<{
+    name: string;
+    description: string;
+  }> = [];
+
   const lines = text.split('\n');
-  
+
   let inProjectSection = false;
-  let currentProject: { name: string; description: string } | null = null;
+
+  let currentProject: {
+    name: string;
+    description: string;
+  } | null = null;
 
   for (const line of lines) {
     const lowerLine = line.toLowerCase().trim();
-    
-    if (PROJECT_KEYWORDS.some(kw => lowerLine.includes(kw)) && lowerLine.length < 100) {
+
+    if (
+      PROJECT_KEYWORDS.some((kw) => lowerLine.includes(kw)) &&
+      lowerLine.length < 100
+    ) {
       inProjectSection = true;
-      currentProject = { name: line.trim(), description: '' };
-    } else if (inProjectSection && currentProject && line.trim().length > 20) {
+
+      currentProject = {
+        name: line.trim(),
+        description: '',
+      };
+    } else if (
+      inProjectSection &&
+      currentProject &&
+      line.trim().length > 20
+    ) {
       currentProject.description += ' ' + line.trim();
-    } else if (inProjectSection && currentProject && currentProject.description && line.trim().length === 0) {
+    } else if (
+      inProjectSection &&
+      currentProject &&
+      currentProject.description &&
+      line.trim().length === 0
+    ) {
       if (currentProject.description.length > 10) {
         projects.push(currentProject);
       }
+
       currentProject = null;
       inProjectSection = false;
     }
   }
 
-  if (currentProject && currentProject.description.length > 10) {
+  if (
+    currentProject &&
+    currentProject.description.length > 10
+  ) {
     projects.push(currentProject);
   }
 
   return projects.slice(0, 5);
 };
 
-const extractExperience = (text: string): Array<{ company: string; role: string; duration: string }> => {
-  const experience: Array<{ company: string; role: string; duration: string }> = [];
+const extractExperience = (
+  text: string
+): Array<{
+  company: string;
+  role: string;
+  duration: string;
+}> => {
+  const experience: Array<{
+    company: string;
+    role: string;
+    duration: string;
+  }> = [];
+
   const lines = text.split('\n');
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     const lowerLine = line.toLowerCase();
-    
-    if (EXPERIENCE_KEYWORDS.some(kw => lowerLine.includes(kw)) && line.length < 80) {
+
+    if (
+      EXPERIENCE_KEYWORDS.some((kw) => lowerLine.includes(kw)) &&
+      line.length < 80
+    ) {
       const parts = line.split(/[-–]/);
+
       if (parts.length >= 1) {
         experience.push({
-          company: parts[0].replace(EXPERIENCE_KEYWORDS.join('|'), '').trim(),
-          role: parts.length > 1 ? parts[1].trim() : '',
-          duration: parts.length > 2 ? parts[2].trim() : '',
+          company: parts[0]
+            .replace(EXPERIENCE_KEYWORDS.join('|'), '')
+            .trim(),
+
+          role:
+            parts.length > 1
+              ? parts[1].trim()
+              : '',
+
+          duration:
+            parts.length > 2
+              ? parts[2].trim()
+              : '',
         });
       }
     }
